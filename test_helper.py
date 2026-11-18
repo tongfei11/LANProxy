@@ -9,7 +9,7 @@ from unittest.mock import patch
 import helper
 
 TEMPLATE = ('[Desktop Entry]\nName=LAN Proxy\nName[zh_CN]=局域网代理\n'
-            'Icon=share/images/zero-proxy.png\n')
+            'Icon=share/images/lan-proxy.png\n')
 
 
 class HelperTests(unittest.TestCase):
@@ -20,11 +20,11 @@ class HelperTests(unittest.TestCase):
         self.base, self.state, self.apps = root/'base', root/'state', root/'apps'
         for folder in (self.base, self.state, self.apps):
             folder.mkdir()
-        (self.base/'zero-proxy.desktop').write_text(TEMPLATE)
-        self.target = self.apps/'zero-proxy.desktop'
+        (self.base/'lan-proxy.desktop').write_text(TEMPLATE)
+        self.target = self.apps/'lan-proxy.desktop'
         self.target.write_text(TEMPLATE)
         def mapped_path(path):
-            if path == '/usr/share/APPLaunch/applications/zero-proxy.desktop':
+            if path == '/usr/share/APPLaunch/applications/lan-proxy.desktop':
                 return self.target
             return Path(path)
         for name, value in [('BASE', self.base), ('STATE', self.state), ('Path', mapped_path)]:
@@ -77,10 +77,10 @@ class HelperTests(unittest.TestCase):
             helper.badge(True)
         active = self.target.read_text()
         self.assertIn('Name[zh_CN]=局域网代理\n', active)
-        self.assertIn('zero-proxy-active.png', active)
+        self.assertIn('lan-proxy-active.png', active)
         helper.badge(False)
         self.assertEqual(self.target.read_text(), TEMPLATE)
-        self.assertEqual(list(self.apps.glob('.zero-proxy-*')), [])
+        self.assertEqual(list(self.apps.glob('.lan-proxy-*')), [])
 
     def test_unchanged_badge_does_not_replace_file(self):
         with patch.object(helper.os, 'replace') as replace:
@@ -92,7 +92,7 @@ class HelperTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 helper.badge(True)
         self.assertEqual(self.target.read_text(), TEMPLATE)
-        self.assertEqual(list(self.apps.glob('.zero-proxy-*')), [])
+        self.assertEqual(list(self.apps.glob('.lan-proxy-*')), [])
 
     def test_cleanup_without_ownership_only_restores_badge(self):
         helper.badge(True)

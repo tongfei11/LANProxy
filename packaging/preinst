@@ -18,8 +18,15 @@ for unit in zero-proxy.service zero-proxy-reset.service; do
     fi
     has_legacy=true
 done
-if [ -d /run/systemd/system ] && systemctl cat zero-proxy.service >/dev/null 2>&1; then
-    systemctl stop zero-proxy.service
+if [ -d /run/systemd/system ]; then
+    for unit in zero-proxy.service lan-proxy.service; do
+        if systemctl cat "$unit" >/dev/null 2>&1; then
+            systemctl stop "$unit"
+        fi
+    done
+    if $has_legacy; then
+        systemctl disable zero-proxy-reset.service
+    fi
 fi
 if $has_legacy; then
     backup=/var/backups/zero-proxy
@@ -29,4 +36,11 @@ if $has_legacy; then
             mv "$legacy/$unit" "$backup/$unit"
         fi
     done
+fi
+
+# Remove only the launcher entry owned by the old development install.
+entry=/usr/share/APPLaunch/applications/zero-proxy.desktop
+if $has_legacy && [ -f "$entry" ] &&
+    grep -Fxq 'Exec=/usr/bin/python3 /usr/local/lib/zero-proxy/ui.py' "$entry"; then
+    mv "$entry" "$backup/zero-proxy.desktop"
 fi

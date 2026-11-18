@@ -3,11 +3,14 @@ import json
 import subprocess
 from pathlib import Path
 from core import DEFAULT, atomic_json, validate
-CONFIG = Path.home() / '.config/zero-proxy/config.json'
+CONFIG = Path.home() / '.config/lan-proxy/config.json'
+LEGACY_CONFIG = Path.home() / '.config/zero-proxy/config.json'
+LANGUAGE = CONFIG.with_name('language.json')
 HELPER = str(Path(__file__).resolve().with_name('helper.py'))
 
 def load_config():
-    try: return validate(json.loads(CONFIG.read_text()))
+    path = CONFIG if CONFIG.exists() else LEGACY_CONFIG
+    try: return validate(json.loads(path.read_text()))
     except (OSError, ValueError, TypeError): return dict(DEFAULT)
 
 def save_config(data):
@@ -36,3 +39,12 @@ def connect(config):
 
 def disconnect():
     return call('disconnect')
+
+def load_language():
+    try:
+        return 'cn' if json.loads(LANGUAGE.read_text()) == 'cn' else 'en'
+    except (OSError, ValueError):
+        return 'en'
+
+def save_language(language):
+    atomic_json(LANGUAGE, language)

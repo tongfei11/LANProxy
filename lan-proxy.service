@@ -1,0 +1,14 @@
+[Unit]
+Description=LAN Proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/lan-proxy/relay.py /var/lib/lan-proxy/redsocks.conf
+ExecStartPost=/usr/bin/python3 /usr/local/lib/lan-proxy/helper.py activate
+ExecStopPost=/usr/bin/python3 /usr/local/lib/lan-proxy/helper.py cleanup
+TimeoutStartSec=18
+TimeoutStopSec=8
+Restart=no

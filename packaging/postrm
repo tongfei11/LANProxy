@@ -8,6 +8,6 @@ case "$1" in
         ;;
 esac
 if [ "$1" = purge ]; then
-    rm -f /var/lib/zero-proxy/redsocks.conf /var/lib/zero-proxy/candidate.conf
-    rmdir /var/lib/zero-proxy 2>/dev/null || true
+    rm -f /var/lib/lan-proxy/redsocks.conf /var/lib/lan-proxy/candidate.conf
+    rmdir /var/lib/lan-proxy 2>/dev/null || true
 fi

@@ -12,6 +12,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from i18n import translate
+
 SIZE = (320, 170)
 EVENT = struct.Struct('@llHHi')
 KEYBOARD = '/dev/input/by-path/platform-3f804000.i2c-event'
@@ -61,8 +63,10 @@ def rgb565(image):
 
 
 class App:
-    def __init__(self, backend):
+    def __init__(self, backend, language=None):
         self.backend = backend
+        self.language = language or backend.load_language()
+        self.error_prefix = None
         self.config = dict(backend.load_config())
         self.state = {'active': None, 'message': '读取状态…'}
         self.edit = None
@@ -122,10 +126,13 @@ class App:
             if error:
                 prefix = {'connect': '连接失败', 'disconnect': '断开失败',
                           'save': '保存失败', 'status': '状态读取失败'}[name]
-                self.message = f'{prefix}：{error}'
+                self.error_prefix = prefix
+                self.message = error
             else:
                 if state is not None:
                     self.state = state
+                if name != 'status':
+                    self.error_prefix = None
                 if name == 'save':
                     self.config = data
                     self.edit = None
@@ -134,11 +141,14 @@ class App:
                     self.connection_changed = True
                     self.message = ''
 
+    def tr(self, message):
+        return translate(message, self.language)
+
     def exit_toast(self):
         if self.state['active']:
-            return '代理继续在后台运行'
+            return self.tr('代理继续在后台运行')
         if self.connection_changed and self.state['active'] is False:
-            return '代理已断开'
+            return self.tr('代理已断开')
         return ''
 
     def key(self, code, value):
@@ -148,6 +158,16 @@ class App:
         self.pressed.add(code)
         if value not in (1, 2):
             return True
+        if code == 38 and value == 1 and not self.typing:
+            language = 'cn' if self.language == 'en' else 'en'
+            try:
+                self.backend.save_language(language)
+            except OSError:
+                self.error_prefix = None
+                self.message = '无法保存语言设置'
+            else:
+                self.language = language
+            return True
         if code == 1:
             if value != 1:
                 return True
@@ -155,6 +175,7 @@ class App:
                 return False
             if not self.busy:
                 self.typing = False
+                self.error_prefix = None
                 self.message = '正在保存…'
                 self.submit('save', dict(self.edit))
             return True
@@ -163,6 +184,7 @@ class App:
         enter = code in (28, 96) and value == 1
         if self.edit is None:
             if code == 18 and value == 1:
+                self.error_prefix = None
                 if self.state.get('active'):
                     self.message = '请先断开，再修改配置'
                 elif self.state.get('active') is False:
@@ -172,6 +194,7 @@ class App:
                     self.message = ''
             elif enter and self.state.get('active') is not None:
                 active = self.state['active']
+                self.error_prefix = None
                 self.message = '正在断开…' if active else '正在连接…'
                 self.submit('disconnect' if active else 'connect', dict(self.config))
             return True
@@ -205,15 +228,15 @@ class App:
         image = Image.new('RGB', SIZE, BG)
         d = ImageDraw.Draw(image)
         d.rectangle((0, 0, 319, 29), fill=PANEL)
-        d.text((9, 5), '局域网代理', font=self.large, fill=TEXT)
-        d.text((311, 9), 'LAN Proxy', font=self.small, fill=DIM, anchor='ra')
+        d.text((9, 5), self.tr('局域网代理'), font=self.large, fill=TEXT)
+        d.text((311, 9), 'EN(L)' if self.language == 'en' else 'CN(L)', font=self.small, fill=DIM, anchor='ra')
         if self.edit is not None:
             first = max(0, min(self.index-1, len(FIELDS)-3))
             for row, (field, label) in enumerate(FIELDS[first:first+3], first):
                 y = 34 + (row-first)*30
                 d.rounded_rectangle((6, y, 313, y+27), radius=4, fill=PANEL,
                                     outline=GREEN if row == self.index else PANEL)
-                d.text((12, y+5), label, font=self.small, fill=DIM)
+                d.text((12, y+5), self.tr(label), font=self.small, fill=DIM)
                 value = self.edit[field]
                 if field == 'password':
                     value = '•'*len(value)
@@ -221,7 +244,7 @@ class App:
                     value = value.upper() + '   ‹  ›'
                 if row == self.index and self.typing:
                     value += '▏'
-                d.text((308, y+5), fit(self.small, value or '未设置', 170, True),
+                d.text((308, y+5), fit(self.small, value or self.tr('未设置'), 170, True),
                        font=self.small, fill=TEXT, anchor='ra')
             if self.typing:
                 footer = 'Enter 完成输入   Esc 保存返回'
@@ -232,17 +255,20 @@ class App:
         else:
             active = self.state.get('active', False)
             d.ellipse((10, 41, 18, 49), fill=GREEN if active else DIM)
-            d.text((25, 36), '代理运行中' if active else '读取状态…' if active is None else '未连接', font=self.large,
+            d.text((25, 36), self.tr('代理运行中' if active else '读取状态…' if active is None else '未连接'), font=self.large,
                    fill=GREEN if active else TEXT)
-            target = f"{self.config.get('protocol', 'socks5').upper()}  {self.config.get('host') or '请先编辑配置'}"
+            target = f"{self.config.get('protocol', 'socks5').upper()}  {self.config.get('host') or self.tr('请先编辑配置')}"
             if self.config.get('host'):
                 target += ':'+str(self.config.get('port', ''))
             d.text((10, 68), fit(self.small, target, 300), font=self.small, fill=DIM)
             d.rounded_rectangle((9, 92, 310, 119), radius=5, fill=PANEL, outline=GREEN)
             label = '处理中…' if self.busy else 'Enter 断开连接' if active else 'Enter 连接代理'
-            d.text((160, 96), label, font=self.large, fill=GREEN, anchor='ma')
+            d.text((160, 96), self.tr(label), font=self.large, fill=GREEN, anchor='ma')
             footer = 'Esc 返回（保持连接）' if active else 'E 编辑配置    Esc 返回'
-        message = self.message
+        message = self.tr(self.message)
+        if self.error_prefix and message:
+            joiner = ': ' if self.language == 'en' else '：'
+            message = self.tr(self.error_prefix) + joiner + message
         if message:
             split = len(message)
             while self.small.getlength(message[:split]) > 302:
@@ -252,7 +278,7 @@ class App:
             if split < len(message):
                 d.text((9, 135), fit(self.small, message[split:], 302), font=self.small, fill=DIM)
         d.rectangle((0, 150, 319, 169), fill=PANEL)
-        d.text((8, 152), footer, font=self.small, fill=DIM)
+        d.text((8, 152), self.tr(footer), font=self.small, fill=DIM)
         if toast:
             width = round(self.large.getlength(toast)) + 34
             left = (SIZE[0] - width) // 2
@@ -267,6 +293,7 @@ def main():
     parser.add_argument('--framebuffer', default='/dev/fb_lcd')
     parser.add_argument('--keyboard', default=KEYBOARD)
     parser.add_argument('--preview', type=Path)
+    parser.add_argument('--lang', choices=('en', 'cn'), help='Language for preview output')
     args = parser.parse_args()
     if args.preview:
         class Demo:
@@ -274,7 +301,7 @@ def main():
                 return dict(protocol='socks5', host='192.168.1.2', port=1080, username='', password='')
             def status(self):
                 return dict(active=False, message='退出界面后，连接继续保留')
-        app = App(Demo())
+        app = App(Demo(), language=args.lang or 'en')
         app.drain()
         app.state = Demo().status()
         app.busy = False

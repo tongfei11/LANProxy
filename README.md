@@ -1,6 +1,6 @@
 # LAN Proxy · 局域网代理
 
-Cardputer Zero 的单配置 HTTP CONNECT / SOCKS5 客户端。
+Cardputer Zero 的单配置 HTTP CONNECT / SOCKS5 客户端。界面默认英文，按右上角标示的 L 键可切换 English / 简体中文，应用会记住选择。
 
 - Enter 连接或断开，E 编辑配置，Esc 返回启动器并保留连接。返回前会短暂提示后台运行或已断开。
 - 配置页用 F/X 上下选项。协议用左右或 Enter 切换。其他字段用 Enter 开始或完成输入，输入时 F/X 是普通字母。Esc 保存并返回。
@@ -14,15 +14,17 @@ Cardputer Zero 的单配置 HTTP CONNECT / SOCKS5 客户端。
 在 Cardputer Zero 上下载 [最新 ARM64 .deb](https://github.com/tongfei11/LANProxy/releases/latest)，在安装包所在目录执行：
 
 ```sh
-sudo apt install ./zero-proxy_0.1.0_arm64.deb
+sudo apt install ./lan-proxy_0.1.1_arm64.deb
 ```
 
 需要 Debian 13、Cardputer Zero 启动器和设备已有的免密 sudo。APT 安装 Debian 提供的 redsocks 等依赖。LAN Proxy 使用自己的 systemd 服务和配置，回环端口为 TCP 42145 和 TCP/UDP 42153。
 
-卸载使用 `sudo apt remove zero-proxy`，会先停止代理并恢复直连。用户配置保留，便于重新安装时使用。
+卸载使用 `sudo apt remove lan-proxy`，会先停止代理并恢复直连。用户配置保留，便于重新安装时使用。
 
-用户配置保存在 `~/.config/zero-proxy/config.json`。系统运行配置在 `/var/lib/zero-proxy/redsocks.conf`，配置文件权限为 0600。断开或后台退出时删除本应用拥有的 `inet zproxy_lite` 防火墙表。
+从旧包 `zero-proxy` 迁移时，用上面的 APT 命令安装新包，APT 会替换旧包。新版会读取原代理配置。
 
-维护命令为 `sudo systemctl stop zero-proxy.service`，查看日志用 `sudo journalctl -u zero-proxy.service`。运行单元测试使用 `python3 -m unittest discover -v`。
+用户配置保存在 `~/.config/lan-proxy/config.json`。系统运行配置在 `/var/lib/lan-proxy/redsocks.conf`，配置文件权限为 0600。断开或后台退出时删除本应用拥有的 `inet zproxy_lite` 防火墙表。
+
+维护命令为 `sudo systemctl stop lan-proxy.service`，查看日志用 `sudo journalctl -u lan-proxy.service`。运行单元测试使用 `python3 -m unittest discover -v`。
 
 在装有 dpkg 的 Linux 环境运行 `sh packaging/build-deb.sh` 可重新构建安装包。设备上的源码安装脚本 `install.sh` 仅用于开发。

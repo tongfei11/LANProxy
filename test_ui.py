@@ -9,6 +9,13 @@ class Backend:
         self.config = dict(protocol='socks5', host='192.168.1.2', port=1080, username='', password='')
         self.active = False
         self.error = False
+        self.language = 'en'
+
+    def load_language(self):
+        return self.language
+
+    def save_language(self, language):
+        self.language = language
 
     def load_config(self):
         return self.config
@@ -53,12 +60,32 @@ class Controls(unittest.TestCase):
         settle(self.app)
         self.assertTrue(self.backend.active)
         self.assertFalse(key(self.app, 1))
-        self.assertEqual(self.app.exit_toast(), '代理继续在后台运行')
+        self.assertEqual(self.app.exit_toast(), 'Proxy stays active')
         self.assertTrue(self.backend.active)
         key(self.app, 28)
         settle(self.app)
         self.assertFalse(self.backend.active)
-        self.assertEqual(self.app.exit_toast(), '代理已断开')
+        self.assertEqual(self.app.exit_toast(), 'Proxy disconnected')
+
+    def test_language_toggle_is_persistent_and_l_stays_a_letter_in_fields(self):
+        self.assertEqual(self.app.language, 'en')
+        self.assertEqual(self.app.tr('未连接'), 'Disconnected')
+        key(self.app, 38)
+        self.assertEqual(self.app.language, 'cn')
+        reopened = App(self.backend)
+        settle(reopened)
+        self.assertEqual(reopened.language, 'cn')
+        key(reopened, 18)
+        key(reopened, 45)
+        key(reopened, 28)
+        key(reopened, 38)
+        self.assertTrue(reopened.edit['host'].endswith('l'))
+        self.assertEqual(reopened.language, 'cn')
+        key(reopened, 28)
+        key(reopened, 38)
+        self.assertEqual(reopened.language, 'en')
+        self.assertEqual(reopened.tr('代理无法建立 HTTPS 隧道（HTTP 502）'),
+                         'Proxy could not establish an HTTPS tunnel (HTTP 502).')
 
     def test_edit_protocol_and_save_on_return(self):
         key(self.app, 18)

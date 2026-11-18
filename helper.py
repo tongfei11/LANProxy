@@ -9,8 +9,8 @@ from pathlib import Path
 from urllib.parse import quote
 from core import REDSOCKS, atomic_write, firewall_rules, redsocks_config, resolve_lan, validate
 BASE = Path(__file__).resolve().parent
-STATE = Path('/var/lib/zero-proxy')
-UNIT = 'zero-proxy.service'
+STATE = Path('/var/lib/lan-proxy')
+UNIT = 'lan-proxy.service'
 NFT = '/usr/sbin/nft'
 
 def run(*args, check=True, **kwargs):
@@ -21,13 +21,13 @@ def active():
 
 def badge(running):
     import tempfile
-    target = Path('/usr/share/APPLaunch/applications/zero-proxy.desktop')
-    template = (BASE / 'zero-proxy.desktop').read_text()
+    target = Path('/usr/share/APPLaunch/applications/lan-proxy.desktop')
+    template = (BASE / 'lan-proxy.desktop').read_text()
     if running:
-        template = template.replace('zero-proxy.png', 'zero-proxy-active.png')
+        template = template.replace('lan-proxy.png', 'lan-proxy-active.png')
     if target.exists() and target.read_text() == template:
         return
-    fd, name = tempfile.mkstemp(dir=target.parent, prefix='.zero-proxy-')
+    fd, name = tempfile.mkstemp(dir=target.parent, prefix='.lan-proxy-')
     try:
         with os.fdopen(fd, 'w') as output:
             output.write(template)
@@ -115,7 +115,7 @@ def main():
         ok = active()
         return {'active': ok, 'message': '代理运行中' if ok else '未连接'}
     if action not in ('connect', 'disconnect'): raise ValueError('无效操作')
-    with open('/run/lock/zero-proxy.lock', 'w') as lock:
+    with open('/run/lock/lan-proxy.lock', 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if action == 'disconnect':
             run('/usr/bin/systemctl', 'stop', UNIT)
@@ -153,5 +153,5 @@ if __name__ == '__main__':
     try: print(json.dumps(main(), ensure_ascii=False))
     except Exception as exc:
         # Do not leak credentials or generated configs via CalledProcessError.
-        print(str(exc) if isinstance(exc, ValueError) else '系统操作失败，请检查 zero-proxy 服务日志')
+        print(str(exc) if isinstance(exc, ValueError) else '系统操作失败，请检查 lan-proxy 服务日志')
         sys.exit(1)
