@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch LAN Proxy forwarding state
+
+[Path]
+PathChanged=/run/lan-proxy/forwarding
+
+[Install]
+WantedBy=paths.target

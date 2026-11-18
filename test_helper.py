@@ -1,5 +1,4 @@
 """Exercise root-controller ownership and badge behavior without privileged operations."""
-import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -17,20 +16,11 @@ class HelperTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
-        self.base, self.state, self.apps = root/'base', root/'state', root/'apps'
-        for folder in (self.base, self.state, self.apps):
-            folder.mkdir()
-        (self.base/'lan-proxy.desktop').write_text(TEMPLATE)
-        self.target = self.apps/'lan-proxy.desktop'
-        self.target.write_text(TEMPLATE)
-        def mapped_path(path):
-            if path == '/usr/share/APPLaunch/applications/lan-proxy.desktop':
-                return self.target
-            return Path(path)
-        for name, value in [('BASE', self.base), ('STATE', self.state), ('Path', mapped_path)]:
-            patcher = patch.object(helper, name, value)
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        self.state = root / 'state'
+        self.state.mkdir()
+        patcher = patch.object(helper, 'STATE', self.state)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.commands = []
         def run(*args, **kwargs):
             self.commands.append(args)
@@ -66,39 +56,9 @@ class HelperTests(unittest.TestCase):
                         helper.probe(data, '192.168.1.2')
                     self.assertNotIn('sensitive', str(error.exception))
 
-    def test_badge_update_is_atomic_and_restore_uses_template(self):
-        replace = os.replace
-        def observe(source, target):
-            self.assertEqual(self.target.read_text(), TEMPLATE)
-            self.assertIn('Name=LAN Proxy\n', Path(source).read_text())
-            self.assertEqual(Path(source).stat().st_mode & 0o777, 0o644)
-            replace(source, target)
-        with patch.object(helper.os, 'replace', side_effect=observe):
-            helper.badge(True)
-        active = self.target.read_text()
-        self.assertIn('Name[zh_CN]=局域网代理\n', active)
-        self.assertIn('lan-proxy-active.png', active)
-        helper.badge(False)
-        self.assertEqual(self.target.read_text(), TEMPLATE)
-        self.assertEqual(list(self.apps.glob('.lan-proxy-*')), [])
-
-    def test_unchanged_badge_does_not_replace_file(self):
-        with patch.object(helper.os, 'replace') as replace:
-            helper.badge(False)
-        replace.assert_not_called()
-
-    def test_failed_atomic_update_preserves_existing_entry(self):
-        with patch.object(helper.os, 'replace', side_effect=OSError('read only')):
-            with self.assertRaises(OSError):
-                helper.badge(True)
-        self.assertEqual(self.target.read_text(), TEMPLATE)
-        self.assertEqual(list(self.apps.glob('.lan-proxy-*')), [])
-
-    def test_cleanup_without_ownership_only_restores_badge(self):
-        helper.badge(True)
+    def test_cleanup_without_marker_preserves_an_unowned_table(self):
         helper.cleanup()
         self.assertEqual(self.commands, [])
-        self.assertEqual(self.target.read_text(), TEMPLATE)
 
     def test_owned_cleanup_removes_table_and_marker(self):
         marker = self.state/'owns-redirect'
@@ -120,14 +80,29 @@ class HelperTests(unittest.TestCase):
         self.assertTrue(marker.exists())
         self.assertEqual(marker.stat().st_mode & 0o777, 0o600)
 
-    def test_badge_failure_cannot_prevent_network_cleanup(self):
-        marker = self.state/'owns-redirect'
-        marker.touch()
-        with patch.object(helper, 'badge', side_effect=OSError('disk full')):
-            with self.assertRaises(OSError):
-                helper.cleanup()
-        self.assertFalse(marker.exists())
-        self.assertIn((helper.NFT, 'delete', 'table', 'inet', 'zproxy_lite'), self.commands)
+    def test_health_check_skips_network_when_proxy_is_off(self):
+        self.assertEqual(helper.Controller().request({'action': 'check'}), {'active': False})
+        self.mock_run.assert_not_called()
+
+    def test_missing_firewall_reports_unreachable_without_stopping_relay(self):
+        controller = helper.Controller()
+        with patch.object(controller, 'is_active', return_value=True), \
+             patch.object(controller, 'disconnect') as disconnect:
+            result = controller.request({'action': 'check'})
+        self.assertTrue(result['active'])
+        self.assertFalse(result['reachable'])
+        disconnect.assert_not_called()
+
+    def test_local_control_protocol(self):
+        import socket
+        client, server = socket.socketpair()
+        with client, server:
+            client.sendall(b'{"action":"status"}\n')
+            helper.dispatch(helper.Controller(), server)
+            self.assertEqual(client.recv(128), b'{"active": false}\n')
+            client.sendall(b'{"action":"unknown"}\n')
+            helper.dispatch(helper.Controller(), server)
+            self.assertIn(b'"error"', client.recv(128))
 
 
 if __name__ == '__main__':

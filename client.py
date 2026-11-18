@@ -1,12 +1,12 @@
-"""Unprivileged UI API; privileged commands only accept validated JSON."""
+"""Unprivileged client for the LAN Proxy control socket."""
 import json
-import subprocess
+import socket
 from pathlib import Path
 from core import DEFAULT, atomic_json, validate
 CONFIG = Path.home() / '.config/lan-proxy/config.json'
 LEGACY_CONFIG = Path.home() / '.config/zero-proxy/config.json'
 LANGUAGE = CONFIG.with_name('language.json')
-HELPER = str(Path(__file__).resolve().with_name('helper.py'))
+CONTROL_SOCKET = '/run/lan-proxy-control.sock'
 
 def load_config():
     path = CONFIG if CONFIG.exists() else LEGACY_CONFIG
@@ -17,20 +17,29 @@ def save_config(data):
     atomic_json(CONFIG, validate(data))
 
 def call(action, data=None):
+    request = json.dumps({'action': action, 'config': data}, ensure_ascii=False).encode()
     try:
-        p = subprocess.run(['sudo', '-n', '/usr/bin/python3', HELPER, action],
-                       input=json.dumps(data) if data is not None else '',
-                       text=True, capture_output=True, timeout=180)
-    except subprocess.TimeoutExpired:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(65)
+            connection.connect(CONTROL_SOCKET)
+            connection.sendall(request + b'\n')
+            with connection.makefile('rb') as reply:
+                result = json.loads(reply.readline(4096))
+    except TimeoutError:
         raise RuntimeError('设备操作超时，请稍后重试') from None
-    except OSError:
+    except PermissionError:
+        raise RuntimeError('无法控制代理服务，请检查设备权限') from None
+    except (OSError, ValueError):
         raise RuntimeError('无法启动代理控制程序') from None
-    if p.returncode:
-        raise RuntimeError(p.stdout.strip() or '无法控制代理服务，请检查设备权限')
-    return json.loads(p.stdout)
+    if 'error' in result:
+        raise RuntimeError(result['error'])
+    return result
 
 def status():
     return call('status')
+
+def check_connection():
+    return call('check')
 
 def connect(config):
     config = validate(config)

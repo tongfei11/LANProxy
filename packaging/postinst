@@ -2,6 +2,5 @@
 set -eu
 if [ "$1" = configure ] && [ -d /run/systemd/system ]; then
     systemctl daemon-reload
-    systemctl reenable lan-proxy-reset.service
-    /usr/bin/python3 /usr/lib/lan-proxy/helper.py badge
+    systemctl enable --now lan-proxy.socket
 fi

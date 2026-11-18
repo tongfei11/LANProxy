@@ -80,7 +80,7 @@ class App:
         self.results = queue.Queue()
         self.small, self.large = font(12), font(17)
         threading.Thread(target=self.worker, daemon=True).start()
-        self.submit('status')
+        self.submit('check')
 
     def worker(self):
         while True:
@@ -94,9 +94,14 @@ class App:
                     self.backend.save_config(data)
                     self.results.put((name, data, None, None))
                     continue
-                state = self.backend.status() if name == 'status' else {
-                    'active': name == 'connect',
-                }
+                if name == 'check':
+                    state = self.backend.check_connection()
+                elif name == 'status':
+                    state = self.backend.status()
+                else:
+                    state = {'active': name == 'connect'}
+                    if state['active']:
+                        state['reachable'] = True
                 self.results.put((name, data, state, None))
             except Exception as error:
                 # The client exposes safe validation/helper messages for these errors.
@@ -125,19 +130,23 @@ class App:
             changed = True
             if error:
                 prefix = {'connect': '连接失败', 'disconnect': '断开失败',
-                          'save': '保存失败', 'status': '状态读取失败'}[name]
+                          'save': '保存失败', 'status': '状态读取失败',
+                          'check': '状态读取失败'}[name]
                 self.error_prefix = prefix
                 self.message = error
             else:
                 if state is not None:
-                    self.state = state
-                if name != 'status':
+                    if name == 'status' and self.state['active'] and state['active']:
+                        self.state.update(state)
+                    else:
+                        self.state = state
+                if name not in ('status', 'check'):
                     self.error_prefix = None
                 if name == 'save':
                     self.config = data
                     self.edit = None
                     self.message = '配置已保存'
-                elif name != 'status':
+                elif name not in ('status', 'check'):
                     self.connection_changed = True
                     self.message = ''
 
@@ -254,9 +263,19 @@ class App:
                 footer = 'F/X 上下   Enter 编辑   Esc 保存返回'
         else:
             active = self.state.get('active', False)
-            d.ellipse((10, 41, 18, 49), fill=GREEN if active else DIM)
-            d.text((25, 36), self.tr('代理运行中' if active else '读取状态…' if active is None else '未连接'), font=self.large,
-                   fill=GREEN if active else TEXT)
+            reachable = self.state.get('reachable')
+            status, color = '未连接', DIM
+            if active is None:
+                status = '检查代理状态…'
+            elif active and reachable is False:
+                status, color = '代理连通测试失败', '#ffc46d'
+            elif active and reachable:
+                status, color = '代理可用', GREEN
+            elif active:
+                status = '代理运行中'
+            d.ellipse((10, 41, 18, 49), fill=color)
+            d.text((25, 36), self.tr(status), font=self.large,
+                   fill=color if active else TEXT)
             target = f"{self.config.get('protocol', 'socks5').upper()}  {self.config.get('host') or self.tr('请先编辑配置')}"
             if self.config.get('host'):
                 target += ':'+str(self.config.get('port', ''))
@@ -265,7 +284,8 @@ class App:
             label = '处理中…' if self.busy else 'Enter 断开连接' if active else 'Enter 连接代理'
             d.text((160, 96), self.tr(label), font=self.large, fill=GREEN, anchor='ma')
             footer = 'Esc 返回（保持连接）' if active else 'E 编辑配置    Esc 返回'
-        message = self.tr(self.message)
+        detail = self.state.get('detail', '') if self.edit is None and self.state['active'] else ''
+        message = self.tr(self.message or detail)
         if self.error_prefix and message:
             joiner = ': ' if self.language == 'en' else '：'
             message = self.tr(self.error_prefix) + joiner + message
@@ -300,7 +320,8 @@ def main():
             def load_config(self):
                 return dict(protocol='socks5', host='192.168.1.2', port=1080, username='', password='')
             def status(self):
-                return dict(active=False, message='退出界面后，连接继续保留')
+                return dict(active=False)
+            check_connection = status
         app = App(Demo(), language=args.lang or 'en')
         app.drain()
         app.state = Demo().status()

@@ -1,0 +1,16 @@
+[Unit]
+Description=Synchronize the LAN Proxy launcher icon
+
+[Service]
+Type=oneshot
+User=root
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateNetwork=yes
+ReadWritePaths=/usr/share/APPLaunch/applications
+ExecStart=/usr/bin/python3 /usr/lib/lan-proxy/sync_badge.py
+
+[Install]
+WantedBy=multi-user.target

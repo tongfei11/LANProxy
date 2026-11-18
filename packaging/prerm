@@ -3,9 +3,9 @@ set -eu
 case "$1" in
     remove|upgrade|deconfigure)
         if [ -d /run/systemd/system ]; then
-            systemctl stop lan-proxy.service
+            systemctl stop lan-proxy.socket lan-proxy.service
             if [ "$1" != upgrade ]; then
-                systemctl disable lan-proxy-reset.service
+                systemctl disable lan-proxy.socket
             fi
         fi
         ;;

@@ -9,6 +9,8 @@ class Backend:
         self.config = dict(protocol='socks5', host='192.168.1.2', port=1080, username='', password='')
         self.active = False
         self.error = False
+        self.reachable = True
+        self.health_checks = 0
         self.language = 'en'
 
     def load_language(self):
@@ -22,6 +24,12 @@ class Backend:
 
     def status(self):
         return dict(active=self.active, message='Ready')
+
+    def check_connection(self):
+        self.health_checks += 1
+        if self.active:
+            return {'active': True, 'reachable': self.reachable, 'detail': 'Test failure'}
+        return {'active': False}
 
     def save_config(self, config):
         if self.error:
@@ -86,6 +94,21 @@ class Controls(unittest.TestCase):
         self.assertEqual(reopened.language, 'en')
         self.assertEqual(reopened.tr('代理无法建立 HTTPS 隧道（HTTP 502）'),
                          'Proxy could not establish an HTTPS tunnel (HTTP 502).')
+
+    def test_reopen_checks_reachability_without_disconnecting(self):
+        self.backend.active = True
+        self.backend.reachable = False
+        reopened = App(self.backend)
+        settle(reopened)
+        self.assertFalse(reopened.state['reachable'])
+        self.assertTrue(self.backend.active)
+        reopened.submit('status')
+        settle(reopened)
+        self.assertFalse(reopened.state['reachable'])
+        self.assertEqual(self.backend.health_checks, 2)
+        key(reopened, 28)
+        settle(reopened)
+        self.assertFalse(reopened.state['active'])
 
     def test_edit_protocol_and_save_on_return(self):
         key(self.app, 18)

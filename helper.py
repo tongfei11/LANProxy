@@ -1,6 +1,8 @@
 #!/usr/bin/python3
-"""Root-owned fixed-path service controller. Never accepts executable paths."""
-import fcntl
+"""Socket-activated non-root controller for the LAN Proxy service."""
+import socket
+import signal
+import select
 import json
 import os
 import subprocess
@@ -8,42 +10,22 @@ import sys
 from pathlib import Path
 from urllib.parse import quote
 from core import REDSOCKS, atomic_write, firewall_rules, redsocks_config, resolve_lan, validate
-BASE = Path(__file__).resolve().parent
-STATE = Path('/var/lib/lan-proxy')
-UNIT = 'lan-proxy.service'
+STATE = Path('/run/lan-proxy')
 NFT = '/usr/sbin/nft'
+CONTROL_TIMEOUT = 3
+MAX_REQUEST = 16384
 
 def run(*args, check=True, **kwargs):
     return subprocess.run(args, check=check, capture_output=True, text=True, timeout=20, **kwargs)
 
-def active():
-    return run('/usr/bin/systemctl', 'is-active', '--quiet', UNIT, check=False).returncode == 0
-
-def badge(running):
-    import tempfile
-    target = Path('/usr/share/APPLaunch/applications/lan-proxy.desktop')
-    template = (BASE / 'lan-proxy.desktop').read_text()
-    if running:
-        template = template.replace('lan-proxy.png', 'lan-proxy-active.png')
-    if target.exists() and target.read_text() == template:
-        return
-    fd, name = tempfile.mkstemp(dir=target.parent, prefix='.lan-proxy-')
-    try:
-        with os.fdopen(fd, 'w') as output:
-            output.write(template)
-        os.chmod(name, 0o644)
-        os.replace(name, target)
-    finally:
-        if os.path.exists(name): os.unlink(name)
-
 def cleanup():
+    (STATE / 'forwarding').unlink(missing_ok=True)
     marker = STATE / 'owns-redirect'
     if marker.exists():
         deletion = run(NFT, 'delete', 'table', 'inet', 'zproxy_lite', check=False)
         if deletion.returncode and run(NFT, 'list', 'table', 'inet', 'zproxy_lite', check=False).returncode == 0:
             raise ValueError('代理网络规则清理失败')
         marker.unlink()
-    badge(False)
 
 def activate():
     if run(NFT, 'list', 'table', 'inet', 'zproxy_lite', check=False).returncode == 0:
@@ -56,11 +38,11 @@ def activate():
         marker.unlink()
         raise
 
-def verify_transparent():
+def verify_transparent(connect_timeout=12, max_time=15):
     failures = []
     for url in ('https://example.com', 'https://example.org'):
         result = run('/usr/bin/curl', '--disable', '--noproxy', '*', '--ipv4',
-                     '--connect-timeout', '12', '--max-time', '15', '--silent', '--fail',
+                     '--connect-timeout', str(connect_timeout), '--max-time', str(max_time), '--silent', '--fail',
                      '--output', '/dev/null', url, check=False)
         if result.returncode == 0:
             return
@@ -105,53 +87,134 @@ def probe(data, ip):
         message = '代理访问测试网站失败，请检查代理出口'
     raise ValueError(message)
 
-def main():
-    if os.geteuid() != 0: raise ValueError('需要系统权限')
-    action = sys.argv[1] if len(sys.argv) == 2 else ''
-    if action == 'cleanup': cleanup(); return {}
-    if action == 'activate': activate(); return {}
-    if action == 'badge': badge(active()); return {}
-    if action == 'status':
-        ok = active()
-        return {'active': ok, 'message': '代理运行中' if ok else '未连接'}
-    if action not in ('connect', 'disconnect'): raise ValueError('无效操作')
-    with open('/run/lock/lan-proxy.lock', 'w') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        if action == 'disconnect':
-            run('/usr/bin/systemctl', 'stop', UNIT)
+class Controller:
+    def __init__(self):
+        self.relay = None
+
+    def disconnect(self):
+        try:
             cleanup()
-            return {'active': False, 'message': '已断开'}
-        data = validate(json.loads(sys.stdin.read(8193)))
+        finally:
+            if self.relay is not None:
+                try:
+                    os.killpg(self.relay.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    self.relay.wait(timeout=4)
+                except subprocess.TimeoutExpired:
+                    os.killpg(self.relay.pid, signal.SIGKILL)
+                    self.relay.wait()
+                self.relay = None
+            (STATE / 'redsocks.conf').unlink(missing_ok=True)
+
+    def is_active(self):
+        if self.relay is None:
+            return False
+        if self.relay.poll() is not None:
+            self.disconnect()
+            return False
+        return True
+
+    def connect(self, data):
+        if self.is_active():
+            raise ValueError('请先断开，再修改配置')
+        data = validate(data)
         ip = resolve_lan(data['host'])
         probe(data, ip)
         if not Path(REDSOCKS).is_file():
             raise ValueError('缺少 redsocks，请检查应用安装')
-        STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
-        candidate = STATE / 'candidate.conf'
-        atomic_write(candidate, redsocks_config(data, ip))
+        config = STATE / 'redsocks.conf'
+        atomic_write(config, redsocks_config(data, ip))
         try:
-            run(REDSOCKS, '-t', '-c', str(candidate))
-            run('/usr/bin/systemctl', 'stop', UNIT)
-            os.replace(candidate, STATE / 'redsocks.conf')
-        finally:
-            candidate.unlink(missing_ok=True)
-        try:
-            run('/usr/bin/systemctl', 'start', UNIT)
+            run(REDSOCKS, '-t', '-c', str(config))
+            self.relay = subprocess.Popen(
+                [sys.executable, str(Path(__file__).with_name('relay.py')), str(config)],
+                stdout=subprocess.PIPE, start_new_session=True)
+            self.wait_for_relay()
+            activate()
             verify_transparent()
-            if not active():
+            if not self.is_active():
                 raise ValueError('代理服务已退出，请检查设备日志')
-            badge(True)
-        except Exception as error:
-            run('/usr/bin/systemctl', 'stop', UNIT, check=False)
-            cleanup()
-            if isinstance(error, ValueError):
-                raise
-            raise ValueError('代理服务启动失败，请检查设备日志') from None
-        return {'active': True, 'message': '代理运行中'}
+            (STATE / 'forwarding').touch(mode=0o600)
+        except Exception:
+            self.disconnect()
+            raise
+
+    def wait_for_relay(self):
+        with self.relay.stdout as ready:
+            if select.select([ready], [], [], 6)[0] and ready.readline() == b'READY\n':
+                return
+        raise ValueError('代理服务启动失败，请检查设备日志')
+
+    def check_connection(self):
+        if not self.is_active():
+            return {'active': False}
+        try:
+            if run(NFT, 'list', 'table', 'inet', 'zproxy_lite', check=False).returncode:
+                raise ValueError('代理转发规则未生效')
+            verify_transparent(connect_timeout=4, max_time=5)
+        except (ValueError, OSError, subprocess.SubprocessError) as error:
+            detail = str(error) if isinstance(error, ValueError) else '无法完成代理连通性检查'
+            return {'active': self.is_active(), 'reachable': False, 'detail': detail}
+        active = self.is_active()
+        return {'active': active, 'reachable': active}
+
+    def request(self, request):
+        if not isinstance(request, dict):
+            raise ValueError('无效操作')
+        action = request.get('action')
+        if action == 'connect':
+            self.connect(request.get('config'))
+        elif action == 'disconnect':
+            self.disconnect()
+        elif action == 'check':
+            return self.check_connection()
+        elif action != 'status':
+            raise ValueError('无效操作')
+        return {'active': self.is_active()}
+
+
+def dispatch(controller, connection):
+    connection.settimeout(CONTROL_TIMEOUT)
+    try:
+        with connection.makefile('rb') as stream:
+            payload = stream.readline(MAX_REQUEST + 1)
+        if len(payload) > MAX_REQUEST or not payload.endswith(b'\n'):
+            return
+        try:
+            response = controller.request(json.loads(payload))
+        except ValueError as error:
+            response = {'error': str(error)}
+        except (OSError, subprocess.SubprocessError):
+            response = {'error': '系统操作失败，请检查 lan-proxy 服务日志'}
+        connection.sendall(json.dumps(response).encode() + b'\n')
+    except OSError:
+        # A client can leave the interface while the requested action runs.
+        pass
+
+
+def main():
+    if sys.argv[1:] == ['cleanup']:
+        cleanup()
+        return
+    if os.environ.get('LISTEN_PID') != str(os.getpid()) or os.environ.get('LISTEN_FDS') != '1':
+        raise RuntimeError('Start through lan-proxy.socket')
+    controller = Controller()
+    with socket.socket(fileno=3) as listener:
+        listener.settimeout(1)
+        try:
+            while True:
+                controller.is_active()
+                try:
+                    connection, _ = listener.accept()
+                except socket.timeout:
+                    continue
+                with connection:
+                    dispatch(controller, connection)
+        finally:
+            controller.disconnect()
+
 
 if __name__ == '__main__':
-    try: print(json.dumps(main(), ensure_ascii=False))
-    except Exception as exc:
-        # Do not leak credentials or generated configs via CalledProcessError.
-        print(str(exc) if isinstance(exc, ValueError) else '系统操作失败，请检查 lan-proxy 服务日志')
-        sys.exit(1)
+    main()

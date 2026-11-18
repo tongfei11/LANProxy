@@ -1,0 +1,11 @@
+[Unit]
+Description=LAN Proxy control socket
+
+[Socket]
+ListenStream=/run/lan-proxy-control.sock
+SocketMode=0660
+SocketGroup=netdev
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

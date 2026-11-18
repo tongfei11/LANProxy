@@ -1,14 +1,20 @@
 [Unit]
-Description=LAN Proxy
-After=network-online.target
-Wants=network-online.target
+Description=LAN Proxy controller
+Requires=lan-proxy.socket
+After=lan-proxy.socket
 
 [Service]
-Type=notify
+Type=exec
+DynamicUser=yes
+User=lan-proxy
+RuntimeDirectory=lan-proxy
+RuntimeDirectoryMode=0700
 UMask=0077
-ExecStart=/usr/bin/python3 /usr/local/lib/lan-proxy/relay.py /var/lib/lan-proxy/redsocks.conf
-ExecStartPost=/usr/bin/python3 /usr/local/lib/lan-proxy/helper.py activate
-ExecStopPost=/usr/bin/python3 /usr/local/lib/lan-proxy/helper.py cleanup
-TimeoutStartSec=18
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ExecStart=/usr/bin/python3 /usr/lib/lan-proxy/helper.py
+ExecStopPost=/usr/bin/python3 /usr/lib/lan-proxy/helper.py cleanup
 TimeoutStopSec=8
-Restart=no

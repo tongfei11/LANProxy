@@ -1,8 +1,8 @@
 """Supervise redsocks and relay local DNS over HTTPS through it."""
 import http.client
-import os
 import socket
 import socketserver
+import signal
 import ssl
 import struct
 import subprocess
@@ -132,15 +132,6 @@ class TCP6Server(TCPServer):
     address_family = socket.AF_INET6
 
 
-def notify_ready():
-    address = os.getenv('NOTIFY_SOCKET')
-    if address:
-        if address.startswith('@'):
-            address = '\0' + address[1:]
-        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
-            sock.sendto(b'READY=1', address)
-
-
 def main(config):
     with ExitStack() as stack:
         servers = [stack.enter_context(cls((host, DNS_PORT), handler)) for cls, host, handler in (
@@ -160,7 +151,7 @@ def main(config):
                         time.sleep(0.1)
                 else:
                     return 1
-                notify_ready()
+                print('READY', flush=True)
                 return proxy.wait() or 1
             finally:
                 if proxy.poll() is None:
@@ -168,4 +159,8 @@ def main(config):
 
 
 if __name__ == '__main__':
+    def stop(*_):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, stop)
     sys.exit(main(sys.argv[1]))
