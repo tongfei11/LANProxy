@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    remove|upgrade|deconfigure)
+        if [ -d /run/systemd/system ]; then
+            systemctl stop zero-proxy.service
+            if [ "$1" != upgrade ]; then
+                systemctl disable zero-proxy-reset.service
+            fi
+        fi
+        ;;
+esac

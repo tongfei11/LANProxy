@@ -1,0 +1,5 @@
+Upstream-Name: LAN Proxy
+Source: https://github.com/tongfei11/LANProxy
+Copyright: 2026 tongfei11
+The package contains LAN Proxy application files. The Debian redsocks
+package is a separate runtime dependency with its own copyright file.

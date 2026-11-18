@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    remove|purge)
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload
+        fi
+        ;;
+esac
+if [ "$1" = purge ]; then
+    rm -f /var/lib/zero-proxy/redsocks.conf /var/lib/zero-proxy/candidate.conf
+    rmdir /var/lib/zero-proxy 2>/dev/null || true
+fi

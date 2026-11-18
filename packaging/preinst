@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+case "$1" in install|upgrade) ;; *) exit 0 ;; esac
+legacy=/etc/systemd/system
+has_legacy=false
+# The development installer put these known units in /etc, which would
+# otherwise override the package units in /usr/lib.
+for unit in zero-proxy.service zero-proxy-reset.service; do
+    file="$legacy/$unit"
+    [ -e "$file" ] || continue
+    case "$unit" in
+        zero-proxy.service) expected=1069f4b0813de04a7012b14e5ff23a3bc36bf2aed7ee1d1bc640895573e9560a ;;
+        zero-proxy-reset.service) expected=17eba723b38851feb0ee4548c6c7dda744a3ff61cf083a5f3cf179f1e68ef3d4 ;;
+    esac
+    if ! printf '%s  %s\n' "$expected" "$file" | sha256sum -c --status; then
+        echo "A custom $file overrides the package unit. Move it before installing LAN Proxy." >&2
+        exit 1
+    fi
+    has_legacy=true
+done
+if [ -d /run/systemd/system ] && systemctl cat zero-proxy.service >/dev/null 2>&1; then
+    systemctl stop zero-proxy.service
+fi
+if $has_legacy; then
+    backup=/var/backups/zero-proxy
+    install -d -m 700 "$backup"
+    for unit in zero-proxy.service zero-proxy-reset.service; do
+        if [ -f "$legacy/$unit" ]; then
+            mv "$legacy/$unit" "$backup/$unit"
+        fi
+    done
+fi

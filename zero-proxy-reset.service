@@ -1,0 +1,10 @@
+[Unit]
+Description=Reset Zero Proxy launcher status after boot
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/zero-proxy/helper.py cleanup
+
+[Install]
+WantedBy=multi-user.target

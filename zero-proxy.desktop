@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=LAN Proxy
+Name[zh_CN]=局域网代理
+Comment=Connect to a saved HTTP or SOCKS5 LAN proxy
+Exec=/usr/bin/python3 /usr/local/lib/zero-proxy/ui.py
+Icon=share/images/zero-proxy.png
+Terminal=false
+Categories=Network;

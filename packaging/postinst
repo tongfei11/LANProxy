@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+if [ "$1" = configure ] && [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    systemctl reenable zero-proxy-reset.service
+    /usr/bin/python3 /usr/lib/zero-proxy/helper.py badge
+fi

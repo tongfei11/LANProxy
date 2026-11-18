@@ -1,0 +1,112 @@
+import time
+import unittest
+
+from ui import App, EVENT, rgb565
+
+
+class Backend:
+    def __init__(self):
+        self.config = dict(protocol='socks5', host='192.168.1.2', port=1080, username='', password='')
+        self.active = False
+        self.error = False
+
+    def load_config(self):
+        return self.config
+
+    def status(self):
+        return dict(active=self.active, message='Ready')
+
+    def save_config(self, config):
+        if self.error:
+            raise ValueError('请输入代理地址')
+        self.config = config
+
+    def connect(self, config):
+        self.active = True
+
+    def disconnect(self):
+        self.active = False
+
+
+def settle(app):
+    deadline = time.monotonic()+2
+    while app.busy and time.monotonic() < deadline:
+        app.drain()
+        time.sleep(0.001)
+    assert not app.busy
+
+
+def key(app, code):
+    result = app.key(code, 1)
+    app.key(code, 0)
+    return result
+
+
+class Controls(unittest.TestCase):
+    def setUp(self):
+        self.backend = Backend()
+        self.app = App(self.backend)
+        settle(self.app)
+
+    def test_connect_exit_preserves_connection(self):
+        key(self.app, 28)
+        settle(self.app)
+        self.assertTrue(self.backend.active)
+        self.assertFalse(key(self.app, 1))
+        self.assertEqual(self.app.exit_toast(), '代理继续在后台运行')
+        self.assertTrue(self.backend.active)
+        key(self.app, 28)
+        settle(self.app)
+        self.assertFalse(self.backend.active)
+        self.assertEqual(self.app.exit_toast(), '代理已断开')
+
+    def test_edit_protocol_and_save_on_return(self):
+        key(self.app, 18)
+        key(self.app, 106)
+        self.assertEqual(self.app.edit['protocol'], 'http')
+        key(self.app, 28)
+        self.assertEqual(self.app.edit['protocol'], 'socks5')
+        self.assertEqual(self.app.index, 0)
+        key(self.app, 105)
+        key(self.app, 1)
+        settle(self.app)
+        self.assertEqual(self.backend.config['protocol'], 'http')
+        self.assertIsNone(self.app.edit)
+
+    def test_fx_navigates_until_enter_begins_typing(self):
+        key(self.app, 18)
+        key(self.app, 45)
+        self.assertEqual(self.app.index, 1)
+        key(self.app, 28)
+        for code in (33, 45, 91):
+            key(self.app, code)
+        self.assertTrue(self.app.edit['host'].endswith('fx.'))
+        self.assertEqual(self.app.index, 1)
+        key(self.app, 28)
+        self.assertEqual(self.app.index, 1)
+        key(self.app, 33)
+        self.assertEqual(self.app.index, 0)
+
+    def test_validation_failure_keeps_editor_and_displays_reason(self):
+        self.backend.error = True
+        key(self.app, 18)
+        key(self.app, 1)
+        settle(self.app)
+        self.assertIsNotNone(self.app.edit)
+        self.assertIn('请输入代理地址', self.app.message)
+
+    def test_busy_does_not_freeze_exit(self):
+        self.app.busy = True
+        self.assertFalse(key(self.app, 1))
+
+    def test_framebuffer_size_and_scroll(self):
+        self.assertEqual(len(rgb565(self.app.draw())), 320*170*2)
+        key(self.app, 18)
+        for _ in range(4):
+            key(self.app, 45)
+        self.assertEqual(self.app.index, 4)
+        self.assertEqual(self.app.draw().size, (320, 170))
+
+
+if __name__ == '__main__':
+    unittest.main()
